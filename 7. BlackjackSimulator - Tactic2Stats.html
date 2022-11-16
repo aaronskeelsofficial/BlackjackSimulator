@@ -1,0 +1,374 @@
+<script>
+	//CONFIG
+	let numOfDecks = 3;
+	let startingMoney = 1000;
+	let startingBet = 15;
+	let roundsToPlay = 1000;
+	let simulationsToRun = 1000;
+	let debugDeal =     0 == 1 ? true : false;
+	let debugEndround = 0 == 1 ? true : false;
+	let debugBalance =  0 == 1 ? true : false;
+	let debugDeck =     0 == 1 ? true : false;
+	let debugEndsim =	0 == 1 ? true : false;
+	//
+
+	class Card {
+		constructor(code, suite) {
+			switch (code) {
+				case "A":
+					this.value = 11;
+					break;
+				case "J":
+				case "Q":
+				case "K":
+					this.value = 10;
+					break;
+				default:
+					this.value = parseInt(code);
+					break;
+			}
+			this.code = code;
+			this.suite = suite;
+		}
+		toString () {
+			return this.code + this.suite;
+		}
+	}
+	class Hand {
+		constructor (GS, cardArray, bet) {
+			this.cardArray = cardArray;
+			this.bet = bet;
+			this.isBlackjack = GS.EvaluateHand(this) == 21 ? true : false;
+			this.gameOver = false;
+		}
+	}
+	class Player {
+		// Hands [hand]
+		constructor (balance,x,y,z) {
+			this.balance = balance;
+			this.gamesPlayed = 0;
+			this.x = x;
+			this.y = y;
+			this.z = z;
+		}
+		DealHand (GS, bet) {
+			let cardArray = [];
+			cardArray.push(GS.PullCard());
+			cardArray.push(GS.PullCard());
+			let hand = new Hand(GS, cardArray, bet);
+			this.hands = [hand];
+		}
+		Play (GS) {
+			for (let handInd = 0;handInd < this.hands.length;handInd++) {
+				let hand = this.hands[handInd];
+				let stopFlag = false;
+				while (!stopFlag) {
+					let handValue = GS.EvaluateHand(hand);
+					// stand at z
+					// at x
+					//   - hit if hand bigger than dealer face up + 7
+					//   - stay
+					// double down at y
+					// hit below y
+					if (handValue >= this.z) {
+						stopFlag = true;
+					} else if (handValue >= this.x) {
+						if (handValue > GS.dealer.cardArray[0].value + 7) {
+							stopFlag = true;
+						} else {
+							hand.cardArray.push(GS.PullCard());
+						}
+					} else if (handValue >= this.y && hand.cardArray.length == 2) {
+						if (this.balance >= hand.bet) { //Double down
+							this.balance -= hand.bet;
+							hand.bet += hand.bet;
+						}
+						hand.cardArray.push(GS.PullCard());
+						stopFlag = true;
+					} else if (handValue == -1) {
+						stopFlag = true;
+					} else {
+						hand.cardArray.push(GS.PullCard());
+					}
+				}
+				this.hands[handInd] = hand;
+			}
+		}
+	}
+	class GameState {
+		constructor() {}
+		InitOriginalDeck () {
+			let codes = "A,2,3,4,5,6,7,8,9,10,J,Q,K";
+			let suits = "H,D,C,S";
+			let deckArray = [];
+			for (let code of codes.split(",")) {
+				for (let suit of suits.split(",")) {
+					deckArray.push(new Card(code, suit));
+				}
+			}
+			this.OriginalDeck = deckArray;
+			this.ActiveDeck = [];
+		}
+		InitDeck () {
+			this.BuildActiveDeck();
+			this.ShuffleActiveDeck();
+		}
+		InitPlayer (balance,x,y,z) {
+			this.players = [new Player(balance,x,y,z)];
+		}
+		InitRound () {
+			//Handle cards
+			if (this.ActiveDeck.length == 0) {
+				this.InitDeck();
+				if (debugDeck)
+					console.log("Reloading " + numOfDecks + " Deck(s): " + this.ActiveDeck.length + " cards.");
+			}
+			//Handle player hand
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				//Bet logic
+				let bet = 0;
+				if (player.gamesPlayed == 0)
+					bet = startingBet;
+				else
+					bet = startingBet;
+				player.balance -= bet;
+				player.DealHand(this, bet);
+			}
+			//Handle dealer hand
+			let cardArray = [];
+			cardArray.push(this.PullCard());
+			cardArray.push(this.PullCard());
+			let hand = new Hand(this, cardArray, 0);
+			this.dealer = hand;
+			if (debugDeal) {
+				console.log("----Deal----");
+				this.LogHands();
+			}
+		}
+		PlayRound () {
+			if (this.dealer.isBlackjack) {
+				for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+					let player = this.players[playerInd];
+					for (let handInd = 0;handInd < player.hands.length;handInd++) {
+						let hand = player.hands[handInd];
+						if (hand.isBlackjack) {
+							//Player pushes
+							hand.gameOver = true;
+							player.balance += hand.bet; //Pay back bet
+						} else {
+							//Player loses
+							hand.gameOver = true;
+						}
+					}
+				}
+			} else {
+				let nonBlackjackPlayerPresent = false;
+				for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+					let player = this.players[playerInd];
+					for (let handInd = 0;handInd < player.hands.length;handInd++) {
+						let hand = player.hands[handInd];
+						if (hand.isBlackjack) {
+							//Player wins 3:2
+							hand.gameOver = true;
+							player.balance += hand.bet; //Pay back bet
+							player.balance += Math.floor(hand.bet*3/2); //Pay winnings
+						} else {
+							//Player plays
+							nonBlackjackPlayerPresent = true;
+						}
+					}
+				}
+				if (nonBlackjackPlayerPresent) {
+					let nonBustPlayerPresent = false;
+					for (let player of this.players) {
+						player.Play(this);
+						for (let handInd = 0;handInd < player.hands.length;handInd++) {
+							let hand = player.hands[handInd];
+							if (this.EvaluateHand(hand) != -1) {
+								nonBustPlayerPresent = true;
+								handInd = player.hands.length;
+							}
+						}
+					}
+					if (nonBustPlayerPresent)
+						this.PlayDealer();
+				}
+			}
+			for (let player of this.players)
+				player.gamesPlayed++;
+		}
+		HandlePlayerVsDealer () {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				for (let handInd = 0;handInd < player.hands.length;handInd++) {
+					let hand = player.hands[handInd];
+					if (!hand.gameOver) {
+						let hValue = this.EvaluateHand(hand);
+						let dValue = this.EvaluateHand(this.dealer);
+						if (hValue == dValue) {
+							//Push
+							hand.gameOver = true;
+							player.balance += hand.bet;
+						} else if (hValue > dValue) {
+							//Win
+							hand.gameOver = true;
+							player.balance += 2*hand.bet;
+						} else {
+							//Lose
+							hand.gameOver = true;
+						}
+					}
+				}
+			}
+		}
+		
+		BuildActiveDeck() {
+			let deckArray = [];
+			for (let i = 0;i < numOfDecks;i++) {
+				deckArray = deckArray.concat(this.OriginalDeck);
+			}
+			this.ActiveDeck = deckArray;
+		}
+		ShuffleActiveDeck () {
+			let cacheDeck = [];
+			let lengthCache = this.ActiveDeck.length;
+			for (let i = 0;i < lengthCache;i++) {
+				let index = Math.floor(Math.random() * this.ActiveDeck.length);
+				cacheDeck.push(this.ActiveDeck[index]);
+				this.ActiveDeck.splice(index,1);
+			}
+			this.ActiveDeck = cacheDeck;
+		}
+		PullCard () {
+			if (this.ActiveDeck.length == 0) {
+				return this.OriginalDeck[Math.floor(Math.random() * this.OriginalDeck.length)];
+			} else {
+				let index = Math.floor(Math.random() * this.ActiveDeck.length);
+				let card = this.ActiveDeck[index];
+				this.ActiveDeck.splice(index,1);
+				return card;
+			}
+		}
+		EvaluateHand (hand, showRawValue) {
+			let potentialValues = [0];
+			for (let card of hand.cardArray) {
+				if (card.code == "A") {
+					let originalCache = [...potentialValues];
+					let newCache = [...potentialValues];
+					for (let i = 0;i < originalCache.length;i++) {
+						originalCache[i] += 1;
+						newCache[i] += 11;
+					}
+					potentialValues = originalCache.concat(newCache);
+				} else {
+					for (let i = 0;i < potentialValues.length;i++) {
+						potentialValues[i] += card.value;
+					}
+				}
+			}
+			let maxRawValue = 0;
+			let maxPotentialValue = -1;
+			for (let value of potentialValues) {
+				if (value > maxPotentialValue && value < 22) {
+					maxPotentialValue = value;
+				}
+				if (value > maxRawValue) {
+					maxRawValue = value;
+				}
+			}
+			if (!showRawValue)
+				return maxPotentialValue;
+			else
+				return maxRawValue;
+		}
+		PlayDealer () {
+			let stopFlag = false;
+			while (!stopFlag) {
+				let handValue = this.EvaluateHand(this.dealer);
+				if (handValue >= 17) {
+					stopFlag = true;
+				} else if (handValue == -1) {
+					stopFlag = true;
+				} else {
+					this.dealer.cardArray.push(this.PullCard());
+				}
+			}
+		}
+		LogHands () {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				for (let hand of player.hands) {
+					console.log("p" + playerInd + ": " + hand.cardArray + " : (" + this.EvaluateHand(hand) + ")");
+				}
+			}
+			console.log("d: " + this.dealer.cardArray + " : (" + this.EvaluateHand(this.dealer) + ")");
+		}
+		LogBalances () {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				console.log("p" + playerInd + ": $" + player.balance + " after " + player.gamesPlayed);
+			}
+		}
+	}
+
+	for (let x = 12;x < 13;x++) {
+		for (let y = 9;y < 12;y++) {
+			if (y > x) //If y = x that just means no doubling down
+				continue;
+			let minArray = [];
+			let maxArray = [];
+			let endingArray = [];
+			let winlossArray = [];
+			let ratioArray = [];
+			let bankruptRounds = 0;
+			for (let simNum = 0;simNum < simulationsToRun;simNum++) {
+				let GS = new GameState();
+				GS.InitOriginalDeck();
+				GS.InitPlayer(startingMoney,x,y,17);
+				let simMin, simMax;
+				for (let round = 0;round < roundsToPlay;round++) {
+					GS.InitRound();
+					GS.PlayRound();
+					GS.HandlePlayerVsDealer();
+					if (debugEndround) {
+						console.log("----Ending----");
+						GS.LogHands();
+					}
+					if (debugBalance) {
+						console.log("----Balance----");
+						GS.LogBalances();
+					}
+					
+					if (typeof simMin == "undefined" || GS.players[0].balance < simMin)
+						simMin = GS.players[0].balance;
+					if (typeof simMax == "undefined" || GS.players[0].balance > simMax)
+						simMax = GS.players[0].balance;
+					if (GS.players[0].balance <= 0) {
+		//				console.log("LOST ALL MONEY AFTER " + (round+1) + " GAMES");
+						round = roundsToPlay;
+						bankruptRounds++;
+					}
+				}
+				minArray.push(simMin);
+				maxArray.push(simMax);
+				endingArray.push(GS.players[0].balance);
+				winlossArray.push(GS.players[0].balance > startingMoney ? 1 : -1);
+				ratioArray.push((GS.players[0].balance / startingMoney) - 1);
+				if (debugEndsim) {
+					console.log(simMin + "_" + simMax + "_" + GS.players[0].balance);
+				}
+			}
+			let avg = function (arr) {
+				let sum = 0;
+				for (let o of arr)
+					sum += o;
+				return sum / arr.length;
+			}
+			console.log(x + ":" + y + "  :  " + avg(ratioArray));
+			let dummy = avg(winlossArray);
+			console.log(dummy + " : " + (500*(1+dummy)) + " : " + (1000 - 500*(1+dummy)));
+			console.log(bankruptRounds);
+		}
+	}
+</script>

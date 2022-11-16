@@ -1,0 +1,517 @@
+<script>
+	//CONFIG
+	let numOfDecks = 3;
+	let startingMoney = 250;
+	let startingBet = 50;
+	let roundsToPlay = 10;
+	let simulationsToRun = 25000;
+	let debugDeal =     0 == 1 ? true : false;
+	let debugDecision =	0 == 1 ? true : false;
+	let debugEndround = 0 == 1 ? true : false;
+	let debugBalance =  0 == 1 ? true : false;
+	let debugDeck =     0 == 1 ? true : false;
+	let debugEndsim =	0 == 1 ? true : false;
+	//
+	let betPercentage = startingBet/startingMoney;
+	
+	let s=0,h=1,d=2,p=3;
+	let dealerValueToInd = ["2","3","4","5","6","7","8","9","10","11"];
+	let hardDecisionMap = [];
+	let hardValueToInd = {"4":0,"5":0,"6":0,"7":0,"8":0,"9":1,"10":2,"11":3,"12":4,"13":5,"14":6,"15":7,"16":8,"17":9,"18":9,"19":9,"20":9,"21":9};
+	hardDecisionMap.push([h,h,h,h,h,h,h,h,h,h]); //4-8
+	hardDecisionMap.push([h,d,d,d,d,h,h,h,h,h]); //9
+	hardDecisionMap.push([d,d,d,d,d,d,d,d,h,h]); //10
+	hardDecisionMap.push([d,d,d,d,d,d,d,d,d,h]); //11
+	hardDecisionMap.push([h,h,s,s,s,h,h,h,h,h]); //12
+	hardDecisionMap.push([s,s,s,s,s,h,h,h,h,h]); //13
+	hardDecisionMap.push([s,s,s,s,s,h,h,h,h,h]); //14
+	hardDecisionMap.push([s,s,s,s,s,h,h,h,s,h]); //15
+	hardDecisionMap.push([s,s,s,s,s,h,h,s,s,s]); //16
+	hardDecisionMap.push([s,s,s,s,s,s,s,s,s,s]); //17-21
+	let softDecisionMap = [];
+	let softValueToInd = ["13","14","15","16","17","18","19","20","21"];
+	softDecisionMap.push([h,h,h,d,d,h,h,h,h,h]); //13
+	softDecisionMap.push([h,h,h,d,d,h,h,h,h,h]); //14
+	softDecisionMap.push([h,h,d,d,d,h,h,h,h,h]); //15
+	softDecisionMap.push([h,h,d,d,d,h,h,h,h,h]); //16
+	softDecisionMap.push([h,d,d,d,d,h,h,h,h,h]); //17
+	softDecisionMap.push([s,d,d,d,d,s,s,h,h,h]); //18
+	softDecisionMap.push([s,s,s,s,s,s,s,s,s,s]); //19
+	softDecisionMap.push([s,s,s,s,s,s,s,s,s,s]); //20
+	softDecisionMap.push([s,s,s,s,s,s,s,s,s,s]); //21
+	let splitDecisionMap = [];
+	let splitValueToInd = ["2","3","4","5","6","7","8","9","10","11"];
+	splitDecisionMap.push([p,p,p,p,p,p,h,h,h,h]); //2
+	splitDecisionMap.push([p,p,p,p,p,p,h,h,h,h]); //3
+	splitDecisionMap.push([h,h,h,p,p,h,h,h,h,h]); //4
+	splitDecisionMap.push([h,h,h,p,p,h,h,h,h,h]); //5
+	splitDecisionMap.push([p,p,p,p,p,h,h,h,h,h]); //6
+	splitDecisionMap.push([p,p,p,p,p,p,h,h,h,h]); //7
+	splitDecisionMap.push([p,p,p,p,p,p,p,p,p,p]); //8
+	splitDecisionMap.push([p,p,p,p,p,s,p,p,s,s]); //9
+	splitDecisionMap.push([s,s,s,s,s,s,s,s,s,s]); //10
+	splitDecisionMap.push([p,p,p,p,p,p,p,p,p,p]); //11
+
+	class Card {
+		constructor(code, suite) {
+			switch (code) {
+				case "A":
+					this.value = 11;
+					break;
+				case "J":
+				case "Q":
+				case "K":
+					this.value = 10;
+					break;
+				default:
+					this.value = parseInt(code);
+					break;
+			}
+			this.code = code;
+			this.suite = suite;
+		}
+		toString () {
+			return this.code + this.suite;
+		}
+	}
+	class Hand {
+		constructor (GS, cardArray, bet) {
+			this.cardArray = cardArray;
+			this.bet = bet;
+			this.isBlackjack = GS.EvaluateHand(this) == 21 ? true : false;
+			this.gameOver = false;
+		}
+	}
+	class Player {
+		// Hands [hand]
+		constructor (balance) {
+			this.balance = balance;
+			this.gamesPlayed = 0;
+		}
+		DealHand (GS, bet) {
+			let cardArray = [];
+			cardArray.push(GS.PullCard());
+			cardArray.push(GS.PullCard());
+			let hand = new Hand(GS, cardArray, bet);
+			this.hands = [hand];
+		}
+		Play (GS) {
+			for (let handInd = 0;handInd < this.hands.length;handInd++) {
+				let hand = this.hands[handInd];
+				let stayFlag = false;
+				while (!stayFlag) {
+					let hand = this.hands[handInd];
+					let handValue = GS.EvaluateHand(hand);
+					let rawHandValue = GS.EvaluateHand(hand, true);
+					if (handValue > 21 || handValue == -1) {
+						stayFlag = true;
+						continue;
+					}
+					let dealerVal = GS.dealer.cardArray[0].value;
+					//Handle split
+					if (hand.cardArray[0].value == hand.cardArray[1].value && hand.cardArray.length == 2) {
+						let value = hand.cardArray[0].value;
+						let dealerInd = dealerValueToInd.indexOf(dealerVal + "");
+						let playerInd = splitValueToInd.indexOf(value + "");
+						let decision = splitDecisionMap[playerInd][dealerInd];
+//						console.log("split," + dealerInd + "," + playerInd + "," + decision);
+						if (decision == s) {
+							stayFlag = true;
+							continue;
+						} else if (decision == h) {
+							this.Hit(GS, handInd);
+							continue;
+						} else if (decision == p) {
+							this.Split(GS, handInd);
+							continue;
+						} else {
+							console.log("EMERGENCY CODE: SPLIT");
+							console.log(hand);
+							stayFlag = true;
+							continue;
+						}
+					}
+					
+					if ((hand.cardArray[0].value == 11 || hand.cardArray[1].value == 11) && rawHandValue <= 21) { //Is Soft
+						let dealerInd = dealerValueToInd.indexOf(dealerVal + "");
+						let playerInd = softValueToInd.indexOf(handValue + "");
+						let decision = softDecisionMap[playerInd][dealerInd];
+//						console.log("soft," + dealerInd + "," + playerInd + "," + decision);
+						if (decision == s) {
+							stayFlag = true;
+							continue;
+						} else if (decision == h) {
+							this.Hit(GS, handInd);
+							continue;
+						} else if (decision == d) {
+							this.Double(GS, handInd);
+							stayFlag = true;
+							continue;
+						} else {
+							console.log("EMERGENCY CODE: SOFT   :   " + dealerInd + "," + playerInd + "," + decision);
+							console.log(hand);
+							stayFlag = true;
+							continue;
+						}
+					} else { //Is hard
+						let dealerInd = dealerValueToInd.indexOf(dealerVal + "");
+						let playerInd = hardValueToInd[handValue + ""];
+						let decision = hardDecisionMap[playerInd][dealerInd];
+//						console.log("hard," + dealerInd + "," + playerInd + "," + decision);
+						if (decision == s) {
+							stayFlag = true;
+							continue;
+						} else if (decision == h) {
+							this.Hit(GS, handInd);
+							continue;
+						} else if (decision == d) {
+							this.Double(GS, handInd);
+							stayFlag = true;
+							continue;
+						} else {
+							console.log("EMERGENCY CODE: HARD   :   " + dealerInd + "," + playerInd + "," + decision);
+							console.log(hand);
+							stayFlag = true;
+							continue;
+						}
+					}
+				}
+			}
+		}
+		
+		Split (GS, handInd) {
+			let hand = this.hands[handInd];
+			let cacheArray = hand.cardArray;
+			let cardArray = [];
+			cardArray[0] = cacheArray[1];
+			cardArray.push(GS.PullCard());
+			cacheArray[1] = GS.PullCard();
+			hand.cardArray = cacheArray;
+			this.hands[handInd] = hand;
+			let hand2 = new Hand(GS, cardArray, hand.bet);
+			this.hands.push(hand2);
+			this.balance -= hand.bet;
+			if (debugDecision) {
+				console.log("----Split");
+				GS.LogHands(true);
+			}
+		}
+		Hit (GS, handInd) {
+			let hand = this.hands[handInd];
+			hand.cardArray.push(GS.PullCard());
+			this.hands[handInd] = hand;
+			if (debugDecision) {
+				console.log("----Hit");
+				GS.LogHands(true);
+			}
+		}
+		Stay (GS, handInd) {
+			if (debugDecision) {
+				console.log("----Stay");
+				GS.LogHands(true);
+			}
+		}
+		Double (GS, handInd) {
+			let hand = this.hands[handInd];
+			if (this.balance >= hand.bet) {
+				this.balance -= hand.bet;
+				hand.bet += hand.bet;
+			}
+			hand.cardArray.push(GS.PullCard());
+			this.hands[handInd] = hand;
+			if (debugDecision) {
+				console.log("----Double");
+				GS.LogHands(true);
+			}
+		}
+	}
+	class GameState {
+		constructor() {}
+		InitOriginalDeck () {
+			let codes = "A,2,3,4,5,6,7,8,9,10,J,Q,K";
+			let suits = "H,D,C,S";
+			let deckArray = [];
+			for (let code of codes.split(",")) {
+				for (let suit of suits.split(",")) {
+					deckArray.push(new Card(code, suit));
+				}
+			}
+			this.OriginalDeck = deckArray;
+			this.ActiveDeck = [];
+		}
+		InitDeck () {
+			this.BuildActiveDeck();
+			this.ShuffleActiveDeck();
+		}
+		InitPlayer (balance) {
+			this.players = [new Player(balance)];
+		}
+		InitRound () {
+			//Handle cards
+			if (this.ActiveDeck.length == 0) {
+				this.InitDeck();
+				if (debugDeck)
+					console.log("Reloading " + numOfDecks + " Deck(s): " + this.ActiveDeck.length + " cards.");
+			}
+			//Handle player hand
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				//Bet logic
+				let bet = 0;
+				bet = startingBet;
+				//
+//				bet = Math.floor(player.balance * betPercentage);
+//				bet = bet < startingMoney * betPercentage ? startingMoney * betPercentage : bet;
+				//
+//				if (player.gamesPlayed == 0)
+//					bet = startingBet;
+//				
+//				else {
+//					if (player.balance < startingMoney) {
+//						bet = startingBet * player.balance/startingMoney;
+//						bet = bet == 0 ? 1 : bet;
+//					} else {
+//						bet = startingBet;
+//					}
+//				}
+				player.balance -= bet;
+				player.DealHand(this, bet);
+			}
+			//Handle dealer hand
+			let cardArray = [];
+			cardArray.push(this.PullCard());
+			cardArray.push(this.PullCard());
+			let hand = new Hand(this, cardArray, 0);
+			this.dealer = hand;
+			if (debugDeal) {
+				console.log("----Deal----");
+				this.LogHands(true);
+			}
+		}
+		PlayRound () {
+			if (this.dealer.isBlackjack) {
+				for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+					let player = this.players[playerInd];
+					for (let handInd = 0;handInd < player.hands.length;handInd++) {
+						let hand = player.hands[handInd];
+						if (hand.isBlackjack) {
+							//Player pushes
+							hand.gameOver = true;
+							player.balance += hand.bet; //Pay back bet
+						} else {
+							//Player loses
+							hand.gameOver = true;
+						}
+					}
+				}
+			} else {
+				let nonBlackjackPlayerPresent = false;
+				for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+					let player = this.players[playerInd];
+					for (let handInd = 0;handInd < player.hands.length;handInd++) {
+						let hand = player.hands[handInd];
+						if (hand.isBlackjack) {
+							//Player wins 3:2
+							hand.gameOver = true;
+							player.balance += hand.bet; //Pay back bet
+							player.balance += Math.floor(hand.bet*3/2); //Pay winnings
+						} else {
+							//Player plays
+							nonBlackjackPlayerPresent = true;
+						}
+					}
+				}
+				if (nonBlackjackPlayerPresent) {
+					let nonBustPlayerPresent = false;
+					for (let player of this.players) {
+						player.Play(this);
+						for (let handInd = 0;handInd < player.hands.length;handInd++) {
+							let hand = player.hands[handInd];
+							if (this.EvaluateHand(hand) != -1) {
+								nonBustPlayerPresent = true;
+								handInd = player.hands.length;
+							}
+						}
+					}
+					if (nonBustPlayerPresent)
+						this.PlayDealer();
+				}
+			}
+			for (let player of this.players)
+				player.gamesPlayed++;
+		}
+		HandlePlayerVsDealer () {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				for (let handInd = 0;handInd < player.hands.length;handInd++) {
+					let hand = player.hands[handInd];
+					if (!hand.gameOver) {
+						let hValue = this.EvaluateHand(hand);
+						let dValue = this.EvaluateHand(this.dealer);
+						if (hValue == dValue) {
+							//Push
+							hand.gameOver = true;
+							player.balance += hand.bet;
+						} else if (hValue > dValue) {
+							//Win
+							hand.gameOver = true;
+							player.balance += 2*hand.bet;
+						} else {
+							//Lose
+							hand.gameOver = true;
+						}
+					}
+				}
+			}
+		}
+		
+		BuildActiveDeck() {
+			let deckArray = [];
+			for (let i = 0;i < numOfDecks;i++) {
+				deckArray = deckArray.concat(this.OriginalDeck);
+			}
+			this.ActiveDeck = deckArray;
+		}
+		ShuffleActiveDeck () {
+			let cacheDeck = [];
+			let lengthCache = this.ActiveDeck.length;
+			for (let i = 0;i < lengthCache;i++) {
+				let index = Math.floor(Math.random() * this.ActiveDeck.length);
+				cacheDeck.push(this.ActiveDeck[index]);
+				this.ActiveDeck.splice(index,1);
+			}
+			this.ActiveDeck = cacheDeck;
+		}
+		PullCard () {
+			if (this.ActiveDeck.length == 0) {
+				return this.OriginalDeck[Math.floor(Math.random() * this.OriginalDeck.length)];
+			} else {
+				let index = Math.floor(Math.random() * this.ActiveDeck.length);
+				let card = this.ActiveDeck[index];
+				this.ActiveDeck.splice(index,1);
+				return card;
+			}
+		}
+		EvaluateHand (hand, showRawValue) {
+			let potentialValues = [0];
+			for (let card of hand.cardArray) {
+				if (card.code == "A") {
+					let originalCache = [...potentialValues];
+					let newCache = [...potentialValues];
+					for (let i = 0;i < originalCache.length;i++) {
+						originalCache[i] += 1;
+						newCache[i] += 11;
+					}
+					potentialValues = originalCache.concat(newCache);
+				} else {
+					for (let i = 0;i < potentialValues.length;i++) {
+						potentialValues[i] += card.value;
+					}
+				}
+			}
+			let maxRawValue = 0;
+			let maxPotentialValue = -1;
+			for (let value of potentialValues) {
+				if (value > maxPotentialValue && value < 22) {
+					maxPotentialValue = value;
+				}
+				if (value > maxRawValue) {
+					maxRawValue = value;
+				}
+			}
+			if (!showRawValue)
+				return maxPotentialValue;
+			else
+				return maxRawValue;
+		}
+		PlayDealer () {
+			let stopFlag = false;
+			while (!stopFlag) {
+				let handValue = this.EvaluateHand(this.dealer);
+				if (handValue >= 17) {
+					stopFlag = true;
+				} else if (handValue == -1) {
+					stopFlag = true;
+				} else {
+					this.dealer.cardArray.push(this.PullCard());
+				}
+			}
+		}
+		LogHands (mysteryDealer) {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				for (let hand of player.hands) {
+					console.log("p" + playerInd + ": " + hand.cardArray + " : (" + this.EvaluateHand(hand) + ")");
+				}
+			}
+			if (mysteryDealer == true) {
+				let str = this.dealer.cardArray[0].code + ",";
+				for (let i = 1;i < this.dealer.cardArray.length;i++) {
+					str = str + "?,";
+				}
+				str = str.substring(0,str.length-1);
+				console.log("d: " + str + " : (" + this.dealer.cardArray[0].value + ")");
+			} else {
+				console.log("d: " + this.dealer.cardArray + " : (" + this.EvaluateHand(this.dealer) + ")");
+			}
+		}
+		LogBalances () {
+			for (let playerInd = 0;playerInd < this.players.length;playerInd++) {
+				let player = this.players[playerInd];
+				console.log("p" + playerInd + ": $" + player.balance + " after " + player.gamesPlayed);
+			}
+		}
+	}
+
+	let minArray = [];
+	let maxArray = [];
+	let endingArray = [];
+	let winlossArray = [];
+	let ratioArray = [];
+	let bankruptSims = 0;
+	for (let simNum = 0;simNum < simulationsToRun;simNum++) {
+		let GS = new GameState();
+		GS.InitOriginalDeck();
+		GS.InitPlayer(startingMoney);
+		let simMin, simMax;
+		for (let round = 0;round < roundsToPlay;round++) {
+			GS.InitRound();
+			GS.PlayRound();
+			GS.HandlePlayerVsDealer();
+			if (debugEndround) {
+				console.log("----Ending----");
+				GS.LogHands();
+			}
+			if (debugBalance) {
+				console.log("----Balance----");
+				GS.LogBalances();
+			}
+			
+			if (typeof simMin == "undefined" || GS.players[0].balance < simMin)
+				simMin = GS.players[0].balance;
+			if (typeof simMax == "undefined" || GS.players[0].balance > simMax)
+				simMax = GS.players[0].balance;
+			if (GS.players[0].balance <= 0) {
+//				console.log("LOST ALL MONEY AFTER " + (round+1) + " GAMES");
+				round = roundsToPlay;
+				bankruptSims++;
+			}
+		}
+		minArray.push(simMin);
+		maxArray.push(simMax);
+		endingArray.push(GS.players[0].balance);
+		winlossArray.push(GS.players[0].balance > startingMoney ? 1 : -1);
+		ratioArray.push((GS.players[0].balance / startingMoney) - 1);
+		if (debugEndsim) {
+			console.log(simMin + "_" + simMax + "_" + GS.players[0].balance);
+		}
+	}
+	let avg = function (arr) {
+		let sum = 0;
+		for (let o of arr)
+			sum += o;
+		return sum / arr.length;
+	}
+	console.log("Expected return: " + (100*(1+avg(ratioArray))) + "% aka $" + avg(endingArray) + " from $" + startingMoney);
+	console.log("Bankrupt " + (bankruptSims / simulationsToRun * 100) + "% of games betting $" + startingBet + " starting with $" + startingMoney);
+</script>
